@@ -1,16 +1,16 @@
-#!/usr/bin/env python2
+#!/usr/bin/env python
 # -*- coding: utf-8 -*-
 
 
 # [dependencies] #######################################################################################################
 
+import sys
+
 from twisted.internet import protocol, reactor
-from twisted.python   import failure
 
 
-# [config] #############################################################################################################
+# [globals] ############################################################################################################
 
-port_start  = 60000
 server_port = None
 
 
@@ -24,22 +24,11 @@ class InternalServer(protocol.Protocol):
 
         self.factory = factory
 
-    # [connectionMade] #################################################################################################
-
-    def connectionMade(self):
-
-        if self.factory.connected_instance is None:
-            self.factory.connected_instance = self
-        else:  # Allow only single connection
-            self.transport.loseConnection()
-            self.transport.connectionLost(failure.Failure(Exception("Only one connection allowed!")))
-
     # [connectionLost] #################################################################################################
 
     def connectionLost(self, reason):
 
-        if self.factory.connected_instance == self:
-            self.factory.connected_instance = None
+        self.factory.connected_instance = None
 
     # [dataReceived] ###################################################################################################
 
@@ -69,12 +58,13 @@ class InternalServerFactory(protocol.Factory):
 
     def buildProtocol(self, addr):
 
-        self.protocol         = InternalServer(self)
-        self.protocol.factory = self
+        if self.connected_instance is None:
+            self.protocol           = InternalServer(self)
+            self.connected_instance = self.protocol
 
-        self.external_server_instance.internal_protocol = self.protocol
+            self.external_server_instance.internal_protocol = self.protocol
 
-        return self.protocol
+            return self.protocol
 
 
 # [ExternalServerFactory] ##############################################################################################
@@ -93,8 +83,8 @@ class ExternalServer(protocol.Protocol):
 
     def connectionMade(self):
 
-        self.factory.port         += 1
         self.internal_server_port  = reactor.listenTCP(self.factory.port, InternalServerFactory(self))
+        self.factory.port         += 1
 
     # [connectionLost] #################################################################################################
 
@@ -137,10 +127,31 @@ class ExternalServerFactory(protocol.Factory):
 
 # [main block] #########################################################################################################
 
+def print_usage():
+    print "\n"
+    print 'Usage:'
+    print '    binder.py <external server port> <internal server ports start>\n'
+    print 'Example:'
+    print '    binder.py 1560 60000'
+
+
+# [main block] #########################################################################################################
+
 if __name__ == "__main__":
 
-    try:
-        server_port = reactor.listenTCP(1560, ExternalServerFactory(port_start))
-        reactor.run()
-    except KeyboardInterrupt:
-        pass
+    if not len(sys.argv) == 3:
+        print_usage()
+    else:
+        try:
+            listen_port = int(sys.argv[1])
+            port_start  = int(sys.argv[2])
+
+            if listen_port < 0 or listen_port > 65535 or port_start < 0 or port_start > 65535:
+                print 'port numbers must be 0-65535'
+            else:
+                server_port = reactor.listenTCP(listen_port, ExternalServerFactory(port_start))
+                reactor.run()
+        except ValueError:
+            print_usage()
+        except KeyboardInterrupt:
+            reactor.stop()
